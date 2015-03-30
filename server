@@ -6,28 +6,27 @@
 # become connected.
 #
 # Usage:
-#     SERVER_KEY=path/to/key $0 container_name external_ip
+#     TLS_KEY=path/to/key $0 container_name external_ip
 #
 # Creates secure sockets exposing all the ports of container_name on this host (whose IP
 # address is external_ip).
+#
+# Assumes the environment variable VAPR_CERTSTORE is set to the directory containing
+# certificates, including the root CA at ca.crt. These are set as part of vapr
+# (https://github.com/SojournLabs/vapr), although you can set them manually.
 
-if [[ "${SERVER_KEY}" == "" ]]; then
-    echo "No server key file specified using environment variable SERVER_KEY."
+if [[ "${TLS_KEY}" == "" ]]; then
+    echo "No key file specified using environment variable TLS_KEY."
     exit 1
 fi
 
-if [[ "${VAPR_CERTSTORE}" == "" ]]; then
-    echo "No certificate file directory specified using environment variable VAPR_CERTSTORE."
-    exit 1
-fi
+KEY_FILE=$(cd $(dirname ${TLS_KEY}); pwd)/$(basename ${TLS_KEY})
 
-CONTAINER="$1"
+CONTAINER=$1
 if [[ "${CONTAINER}" == "" ]]; then
     echo "No container was specified."
     exit 1
 fi
-
-KEY_FILE=$(cd $(dirname ${SERVER_KEY}); pwd)/$(basename ${SERVER_KEY})
 
 # Expose the required number of ports in the ambassador server.
 NUM_PORTS=$(docker inspect -f "{{ .NetworkSettings.Ports | len }}" boot_server)
@@ -41,4 +40,4 @@ until [ ${NUM_PORTS} -eq 0 ]; do
     let NUM_PORTS-=1
 done
 
-docker run -v /var/run/docker.sock:/var/run/docker.sock -v ${VAPR_CERTSTORE}:/vapr/certstore:ro -v ${KEY_FILE}:/vapr/keys/$(basename ${KEY_FILE}):ro --rm -t -i ${PORTS} --name ${CONTAINER}_ambassador_server sojournlabs/ambassador server $*
+docker run -v /var/run/docker.sock:/var/run/docker.sock -v ${VAPR_CERTSTORE:=`pwd`/certstore}:/vapr/certstore:ro -v ${KEY_FILE}:/vapr/keys/$(basename ${KEY_FILE}):ro --rm -t -i ${PORTS} --name ${CONTAINER}_ambassador_server sojournlabs/ambassador server $*

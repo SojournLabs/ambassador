@@ -1,98 +1,98 @@
 #!/bin/sh
-export ROLE=$1
-export CONTAINER=$2
-export EXTERNAL_IP=$3
-export ETCD_HOST=172.17.42.1
-export ETCD_PORT=4001
-export ETCD=${ETCD_HOST}:${ETCD_PORT}
+ETCD_HOST=172.17.42.1
+ETCD_PORT=4001
+ETCD=${ETCD_HOST}:${ETCD_PORT}
 
 . /bin/etcdctl.sh
 
-if [[ "${EXTERNAL_IP}" == "" ]]; then
-    echo "Usage: ... client|server target_container advertised_ip"
-    exit 1
-fi
+block() {
+    # Wait for termination signal.
+    mkfifo pipe && cat pipe
+}
 
-if [[ "${ROLE}" == "client" ]]; then
-    # Client
-    for f in ${EXTERNAL_IP}cl ${EXTERNAL_IP} client peer; do
-        if [[ -f /vapr/certstore/${f}.crt && -f /vapr/keys/${f}.key ]]; then
-            CERT_PAIR=${f}
-            break
-        fi
-    done
-
-    if [[ "${CERT_PAIR}" == "" ]]; then
-        echo "No client certificate-key pair found."
-        exit 1
-    fi
-
-    cat /vapr/certstore/${CERT_PAIR}.crt > /tmp/cert-key.pem
-    cat /vapr/keys/${CERT_PAIR}.key >> /tmp/cert-key.pem
-
-    for PORT_DIR in $(etcdctl_ls vapr/ambassador/${CONTAINER}); do
+client() {
+    # Read the container's ambassador server's public endpoints.
+    for PORT_DIR in $(etcdctl_ls vapr/ambassador/${CONTAINER}/bindings); do
         EXPOSED_PORT=$(basename ${PORT_DIR})
-        PORT=$(etcdctl_get vapr/ambassador/${CONTAINER}/${EXPOSED_PORT}/port)
-        HOST=$(etcdctl_get vapr/ambassador/${CONTAINER}/${EXPOSED_PORT}/host)
+        BINDING=$(etcdctl_get vapr/ambassador/${CONTAINER}/bindings/${EXPOSED_PORT}/bind)
 
-        socat TCP-LISTEN:${EXPOSED_PORT},reuseaddr,fork openssl-connect:${HOST}:${PORT},cert=/tmp/cert-key.pem,cafile=/vapr/certstore/ca.crt &
+        # Begin forwarding the ports.
+        socat TCP-LISTEN:${EXPOSED_PORT},reuseaddr,fork openssl-connect:${BINDING},cert=/tmp/cert-key.pem,cafile=/vapr/certstore/ca.crt &
         echo Forwarding connections to ${CONTAINER}:${EXPOSED_PORT}.
     done
+    
+    block
+}
 
-else
-    # Server
+server() {
+    [[ "${EXTERNAL_IP}" == "" ]] && usage && exit 1
+    
+    # Unregister existing ambassadors.
+    etcdctl_rm vapr/ambassador/${CONTAINER} recursive
+    
     socat TCP-LISTEN:1,reuseaddr UNIX-CLIENT:/var/run/docker.sock &
     socat TCP-LISTEN:2,reuseaddr UNIX-CLIENT:/var/run/docker.sock &
     sleep 1 # Wait for sockets to be set up.
     wget -q -O- http://localhost:1/containers/${CONTAINER}/json > /tmp/target_container_info
     wget -q -O- http://localhost:2/containers/${HOSTNAME}/json > /tmp/ambassador_container_info
+    
+    HOST_PORTS=$(echo /tmp/ambassador_container_info | JSON.awk | awk '{ if ($1 ~ /\["NetworkSettings","Ports",.*"HostPort"]/) { print $1 " " $2; } }' | sed 's/.*"Ports","\([0-9]\+\).*"\([0-9]\+\)"/\1,\2/')
+    TARGET_IP=$(echo /tmp/target_container_info | JSON.awk | awk '{ if ($1 ~ /\["NetworkSettings","IPAddress"]/) { print $2; } }' | sed 's/"\(.*\)"/\1/')
 
-    export HOST_PORTS=$(echo /tmp/ambassador_container_info | JSON.awk | awk '{ if ($1 ~ /\["NetworkSettings","Ports",.*"HostPort"]/) { print $1 " " $2; } }' | sed 's/.*"Ports","\([0-9]\+\).*"\([0-9]\+\)"/\1,\2/')
-    export TARGET_PORTS=$(echo /tmp/target_container_info | JSON.awk | awk '{ if ($1 ~ /\["NetworkSettings","Ports",.*]/) { print $1 " " $2; } }' | sed 's/.*"Ports","\([0-9]\+\)\/.*/\1/')
-    export TARGET_IP=$(echo /tmp/target_container_info | JSON.awk | awk '{ if ($1 ~ /\["NetworkSettings","IPAddress"]/) { print $2; } }' | sed 's/"\(.*\)"/\1/')
-
-    export IFS=$' '
-    export IDX=0
-
-    for f in ${EXTERNAL_IP}srv ${EXTERNAL_IP} server peer; do
-        if [[ -f /vapr/certstore/${f}.crt && -f /vapr/keys/${f}.key ]]; then
-            CERT_PAIR=${f}
-            break
-        fi
-    done
-
-    if [[ "${CERT_PAIR}" == "" ]]; then
-        echo "No server certificate-key pair found."
-        exit 1
-    fi
-
-    cat /vapr/certstore/${CERT_PAIR}.crt > /tmp/cert-key.pem
-    cat /vapr/keys/${CERT_PAIR}.key >> /tmp/cert-key.pem
-
-    for TARGET_PORT in $TARGET_PORTS; do
-        echo "${HOST_PORTS}" | cut -d " " -f $((${IDX} + 1)) | sed 's|/tcp||' > /tmp/host_port_info
-        IFS="," read INTERNAL_PORT EXTERNAL_PORT < /tmp/host_port_info
+    IDX=0
+    
+    while read TARGET_PORT; do
+        IFS="," read INTERNAL_PORT EXTERNAL_PORT << EOF
+$(echo "${HOST_PORTS}" | cut -d " " -f $((${IDX} + 1)) | sed 's|/tcp||')
+EOF
 
         if [[ "$INTERNAL_PORT" == "" ]]; then
             echo "Insufficient ports allocated to ambassador; use the -p argument to docker to allocate more ports."
             exit 1
         fi
 
-        PORT_CMD=$(echo socat openssl-listen:$((${INTERNAL_PORT})),fork,reuseaddr,cert=/tmp/cert-key.pem,cafile=/vapr/certstore/ca.crt TCP4:${TARGET_IP}:${TARGET_PORT})
+        # Spawn socket forwarder
+        socat openssl-listen:$((${INTERNAL_PORT})),fork,reuseaddr,cert=/tmp/cert-key.pem,cafile=/vapr/certstore/ca.crt TCP4:${TARGET_IP}:${TARGET_PORT} &
         echo Forwarding ${EXTERNAL_IP}:${EXTERNAL_PORT} to ${CONTAINER}:${TARGET_PORT}.
 
-        # Spawn socket forwarder
-        /bin/sh -c "${PORT_CMD}" &
-
         # Register forwarder
-        etcdctl_rm vapr/ambassador/${CONTAINER} recursive
-        etcdctl_mkdir vapr/ambassador/${CONTAINER}/${TARGET_PORT}
-        etcdctl_set vapr/ambassador/${CONTAINER}/${TARGET_PORT}/port ${EXTERNAL_PORT}
-        etcdctl_set vapr/ambassador/${CONTAINER}/${TARGET_PORT}/host ${EXTERNAL_IP}
+        etcdctl_mkdir vapr/ambassador/${CONTAINER}/bindings/${TARGET_PORT}
+        etcdctl_set vapr/ambassador/${CONTAINER}/bindings/${TARGET_PORT}/bind ${EXTERNAL_IP}:${EXTERNAL_PORT}
 
-        export IDX=$((IDX + 1))
-    done
+        IDX=$((IDX + 1))
+    done << EOF
+$(echo /tmp/target_container_info | JSON.awk | awk '{ if ($1 ~ /\["NetworkSettings","Ports",.*]/) { print $1 " " $2; } }' | sed 's/.*"Ports","\([0-9]\+\)\/.*/\1/')
+EOF
+    
+    block
+}
+
+usage() {
+    echo "Usage: $0 server target_container advertised_ip"
+    echo "Usage: $0 client target_container"
+    exit 1
+}
+
+# Read the arguments specified.
+for var in ROLE CONTAINER EXTERNAL_IP; do
+    eval "$var=\${1}"
+    shift
+done
+
+KEYFILE_NAME=$(ls /vapr/keys)
+KEYFILE_BASENAME=${KEYFILE_NAME%.*}
+
+# Merge the certificate and private key into a pem file at /tmp/cert-key.pem to be used by socat..
+if cat /vapr/certstore/${KEYFILE_BASENAME}.crt /vapr/keys/${KEYFILE_BASENAME}.key > /tmp/cert-key.pem 2> /dev/null; then
+    # Switch to the appropriate role.
+    case ${ROLE} in
+        client|server)
+            ${ROLE}
+            ;;
+        *)
+            usage
+    esac
 fi
 
-# Block
-mkfifo pipe && cat pipe
+echo "No certificate-key pair found at /vapr/certstore/${KEYFILE_BASENAME}.crt and /vapr/keys/${KEYFILE_BASENAME}.key."; exit 1
+exit 1
