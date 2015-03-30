@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Create a secure ambassador client to link two Docker containers together over an
+# untrusted connection. Requires both the client and server to have access to the same
+# etcd cluster. The cluster does not need to be trusted. However, a DOS attack is trivial
+# if the cluster is compromised and problems may occur if the wrong server and clients
+# become connected.
+#
+# Usage:
+#     CLIENT_KEY=path/to/key $0 container_name external_ip
+#
+# Connects to a container named container_name. The external_ip is *this* host's IP
+# address.
+
+if [[ "${CLIENT_KEY}" == "" ]]; then
+    echo "No client key file specified using environment variable CLIENT_KEY."
+    exit 1
+fi
+
+if [[ "${VAPR_CERTSTORE}" == "" ]]; then
+    echo "No certificate file directory specified using environment variable VAPR_CERTSTORE."
+    exit 1
+fi
+
+
+CONTAINER="$1"
+if [[ "${CONTAINER}" == "" ]]; then
+    echo "No container was specified."
+    exit 1
+fi
+
+KEY_FILE=$(cd $(dirname ${CLIENT_KEY}); pwd)/$(basename ${CLIENT_KEY})
+
+docker run -v /var/run/docker.sock:/var/run/docker.sock -v ${VAPR_CERTSTORE}:/vapr/certstore:ro -v ${KEY_FILE}:/vapr/keys/$(basename ${KEY_FILE}):ro --rm --name ${CONTAINER}_ambassador_client -t -i ${PORTS} sojournlabs/ambassador client $*

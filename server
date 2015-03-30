@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Create a secure ambassador server to link two Docker containers together over an
+# untrusted connection. Requires both the client and server to have access to the same
+# etcd cluster. The cluster does not need to be trusted. However, a DOS attack is trivial
+# if the cluster is compromised and problems may occur if the wrong server and clients
+# become connected.
+#
+# Usage:
+#     SERVER_KEY=path/to/key $0 container_name external_ip
+#
+# Creates secure sockets exposing all the ports of container_name on this host (whose IP
+# address is external_ip).
+
+if [[ "${SERVER_KEY}" == "" ]]; then
+    echo "No server key file specified using environment variable SERVER_KEY."
+    exit 1
+fi
+
+if [[ "${VAPR_CERTSTORE}" == "" ]]; then
+    echo "No certificate file directory specified using environment variable VAPR_CERTSTORE."
+    exit 1
+fi
+
+CONTAINER="$1"
+if [[ "${CONTAINER}" == "" ]]; then
+    echo "No container was specified."
+    exit 1
+fi
+
+KEY_FILE=$(cd $(dirname ${SERVER_KEY}); pwd)/$(basename ${SERVER_KEY})
+
+# Expose the required number of ports in the ambassador server.
+NUM_PORTS=$(docker inspect -f "{{ .NetworkSettings.Ports | len }}" boot_server)
+if [[ "${NUM_PORTS}" == "" ]]; then
+    exit 1
+fi
+
+PORTS=
+until [ ${NUM_PORTS} -eq 0 ]; do
+    PORTS+="-p ${NUM_PORTS} "
+    let NUM_PORTS-=1
+done
+
+docker run -v /var/run/docker.sock:/var/run/docker.sock -v ${VAPR_CERTSTORE}:/vapr/certstore:ro -v ${KEY_FILE}:/vapr/keys/$(basename ${KEY_FILE}):ro --rm -t -i ${PORTS} --name ${CONTAINER}_ambassador_server sojournlabs/ambassador server $*
