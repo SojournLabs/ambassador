@@ -12,13 +12,13 @@ block() {
 
 client() {
     # Read the container's ambassador server's public endpoints.
-    for PORT_DIR in $(etcdctl_ls vapr/ambassador/${CONTAINER}/bindings); do
-        EXPOSED_PORT=$(basename ${PORT_DIR})
-        BINDING=$(etcdctl_get vapr/ambassador/${CONTAINER}/bindings/${EXPOSED_PORT}/bind)
+    for PORT_DIR in $(etcdctl_ls vapr/ambassador/"${CONTAINER}"/bindings); do
+        EXPOSED_PORT=$(basename "${PORT_DIR}")
+        BINDING=$(etcdctl_get vapr/ambassador/"${CONTAINER}"/bindings/"${EXPOSED_PORT}"/bind)
 
         # Begin forwarding the ports.
-        socat TCP-LISTEN:${EXPOSED_PORT},reuseaddr,fork openssl-connect:${BINDING},cert=/tmp/cert-key.pem,cafile=/vapr/certstore/ca.crt &
-        echo Forwarding connections to ${CONTAINER}:${EXPOSED_PORT}.
+        socat TCP-LISTEN:"${EXPOSED_PORT}",reuseaddr,fork openssl-connect:"${BINDING}",cert=/tmp/cert-key.pem,cafile=/vapr/certstore/ca.crt &
+        echo Forwarding connections to "${CONTAINER}:${EXPOSED_PORT}".
     done
     
     block
@@ -28,13 +28,13 @@ server() {
     [[ "${EXTERNAL_IP}" == "" ]] && usage && exit 1
     
     # Unregister existing ambassadors.
-    etcdctl_rm vapr/ambassador/${CONTAINER} recursive
+    etcdctl_rm vapr/ambassador/"${CONTAINER}" recursive
     
     socat TCP-LISTEN:1,reuseaddr UNIX-CLIENT:/var/run/docker.sock &
     socat TCP-LISTEN:2,reuseaddr UNIX-CLIENT:/var/run/docker.sock &
     sleep 1 # Wait for sockets to be set up.
-    wget -q -O- http://localhost:1/containers/${CONTAINER}/json > /tmp/target_container_info
-    wget -q -O- http://localhost:2/containers/${HOSTNAME}/json > /tmp/ambassador_container_info
+    wget -q -O- http://localhost:1/containers/"${CONTAINER}"/json > /tmp/target_container_info
+    wget -q -O- http://localhost:2/containers/"${HOSTNAME}"/json > /tmp/ambassador_container_info
     
     HOST_PORTS=$(echo /tmp/ambassador_container_info | JSON.awk | awk '{ if ($1 ~ /\["NetworkSettings","Ports",.*"HostPort"]/) { print $1 " " $2; } }' | sed 's/.*"Ports","\([0-9]\+\).*"\([0-9]\+\)"/\1,\2/')
     TARGET_IP=$(echo /tmp/target_container_info | JSON.awk | awk '{ if ($1 ~ /\["NetworkSettings","IPAddress"]/) { print $2; } }' | sed 's/"\(.*\)"/\1/')
@@ -52,12 +52,12 @@ EOF
         fi
 
         # Spawn socket forwarder
-        socat openssl-listen:$((${INTERNAL_PORT})),fork,reuseaddr,cert=/tmp/cert-key.pem,cafile=/vapr/certstore/ca.crt TCP4:${TARGET_IP}:${TARGET_PORT} &
-        echo Forwarding ${EXTERNAL_IP}:${EXTERNAL_PORT} to ${CONTAINER}:${TARGET_PORT}.
+        socat openssl-listen:"${INTERNAL_PORT}",fork,reuseaddr,cert=/tmp/cert-key.pem,cafile=/vapr/certstore/ca.crt TCP4:"${TARGET_IP}:${TARGET_PORT}" &
+        echo Forwarding "${EXTERNAL_IP}:${EXTERNAL_PORT}" to "${CONTAINER}:${TARGET_PORT}".
 
         # Register forwarder
-        etcdctl_mkdir vapr/ambassador/${CONTAINER}/bindings/${TARGET_PORT}
-        etcdctl_set vapr/ambassador/${CONTAINER}/bindings/${TARGET_PORT}/bind ${EXTERNAL_IP}:${EXTERNAL_PORT}
+        etcdctl_mkdir vapr/ambassador/"${CONTAINER}"/bindings/"${TARGET_PORT}"
+        etcdctl_set vapr/ambassador/"${CONTAINER}"/bindings/"${TARGET_PORT}"/bind "${EXTERNAL_IP}:${EXTERNAL_PORT}"
 
         IDX=$((IDX + 1))
     done << EOF
@@ -80,12 +80,12 @@ for var in ROLE CONTAINER EXTERNAL_IP; do
 done
 
 KEYFILE_NAME=$(ls /vapr/keys)
-KEYFILE_BASENAME=${KEYFILE_NAME%.*}
+KEYFILE_BASENAME="${KEYFILE_NAME%.*}"
 
 # Merge the certificate and private key into a pem file at /tmp/cert-key.pem to be used by socat..
-if cat /vapr/certstore/${KEYFILE_BASENAME}.crt /vapr/keys/${KEYFILE_BASENAME}.key > /tmp/cert-key.pem 2> /dev/null; then
+if cat /vapr/certstore/"${KEYFILE_BASENAME}".crt /vapr/keys/"${KEYFILE_BASENAME}".key > /tmp/cert-key.pem 2> /dev/null; then
     # Switch to the appropriate role.
-    case ${ROLE} in
+    case "${ROLE}" in
         client|server)
             ${ROLE}
             ;;

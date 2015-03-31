@@ -20,9 +20,9 @@ if [[ "${TLS_KEY}" == "" ]]; then
     exit 1
 fi
 
-KEY_FILE=$(cd $(dirname ${TLS_KEY}); pwd)/$(basename ${TLS_KEY})
+KEY_FILE=$(cd $(dirname "${TLS_KEY}"); pwd)/$(basename "${TLS_KEY}")
 
-CONTAINER=$1
+CONTAINER="$1"
 if [[ "${CONTAINER}" == "" ]]; then
     echo "No container was specified."
     exit 1
@@ -40,4 +40,4 @@ until [ ${NUM_PORTS} -eq 0 ]; do
     let NUM_PORTS-=1
 done
 
-docker run -v /var/run/docker.sock:/var/run/docker.sock -v ${VAPR_CERTSTORE:=`pwd`/certstore}:/vapr/certstore:ro -v ${KEY_FILE}:/vapr/keys/$(basename ${KEY_FILE}):ro --rm -t -i ${PORTS} --name ${CONTAINER}_ambassador_server sojournlabs/ambassador server $*
+docker run -v /var/run/docker.sock:/var/run/docker.sock -v "${VAPR_CERTSTORE:=`pwd`/certstore}":/vapr/certstore:ro -v "${KEY_FILE}":/vapr/keys/$(basename "${KEY_FILE}"):ro --rm -t -i ${PORTS} --name "${CONTAINER}"_ambassador_server sojournlabs/ambassador server "$@"
