@@ -32,11 +32,9 @@ MAINTAINER	jonathan lung <auto+vapr@heresjono.com>
 #   tar xvf socat.tar.gz && rm -f socat.tar.gz
 ADD lib64 /lib64
 ADD bin /bin
-# The following file can be obtained using
-#     curl -O https://raw.githubusercontent.com/SojournLabs/dockertools/master/bin/http.sh; chmod +x http.sh
-ADD http.sh /bin/http.sh
-# You may wish to compare the contents of etcdctl.sh and JSON.awk against a signed copy.
-RUN . /bin/http.sh; HTTP_LATENCY=3 https_content raw.githubusercontent.com GET /SojournLabs/dockertools/master/bin/etcdctl.sh > /bin/etcdctl.sh; chmod +x /bin/etcdctl.sh
-RUN . /bin/http.sh; HTTP_LATENCY=3 https_content raw.githubusercontent.com GET /step-/JSON.awk/master/JSON.awk | sed 's|/bin/awk|/usr/bin/awk|' > /bin/JSON.awk; chmod +x /bin/JSON.awk
+ADD https://raw.githubusercontent.com/SojournLabs/dockertools/master/bin/http.sh /bin/http.sh
+ADD https://raw.githubusercontent.com/SojournLabs/dockertools/master/bin/etcdctl.sh /bin/etcdctl.sh
+ADD https://raw.githubusercontent.com/step-/JSON.awk/master/JSON.awk /bin/JSON.awk
+RUN chmod +x /bin/http.sh /bin/etcdctl.sh /bin/JSON.awk
 ADD amb /bin/amb
 ENTRYPOINT ["/bin/amb"]
