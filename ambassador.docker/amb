@@ -5,6 +5,15 @@ ETCD=${ETCD_HOST}:${ETCD_PORT}
 CHILD_PIDS=
 . /bin/etcdctl.sh
 
+cleanup() {
+    for pid in $CHILD_PIDS; do
+        kill -9 $pid
+    done
+    exit 0
+}
+
+trap cleanup SIGINT SIGTERM
+
 block() {
     # Wait for termination signal.
     mkfifo pipe && cat pipe
@@ -88,7 +97,8 @@ if cat /vapr/certstore/"${KEYFILE_BASENAME}".crt /vapr/keys/"${KEYFILE_BASENAME}
         client|server)
             while [ 1 ]; do
                 ${ROLE}
-                etcdctl_watch vapr/ambassador/"${CONTAINER}"/bindings recursive > /dev/null
+                etcdctl_watch vapr/ambassador/"${CONTAINER}"/bindings recursive > /dev/null &
+                wait $!
                 echo $CHILD_PIDS
                 for pid in $CHILD_PIDS; do
                     kill -9 $pid
