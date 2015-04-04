@@ -2,7 +2,7 @@
 ETCD_HOST=172.17.42.1
 ETCD_PORT=4001
 ETCD=${ETCD_HOST}:${ETCD_PORT}
-
+CHILD_PIDS=
 . /bin/etcdctl.sh
 
 block() {
@@ -18,10 +18,9 @@ client() {
 
         # Begin forwarding the ports.
         socat TCP-LISTEN:"${EXPOSED_PORT}",reuseaddr,fork openssl-connect:"${BINDING}",cert=/tmp/cert-key.pem,cafile=/vapr/certstore/ca.crt &
+        CHILD_PIDS="${CHILD_PIDS} $!"
         echo Forwarding connections to "${CONTAINER}:${EXPOSED_PORT}".
     done
-    
-    block
 }
 
 server() {
@@ -53,6 +52,8 @@ EOF
 
         # Spawn socket forwarder
         socat openssl-listen:"${INTERNAL_PORT}",fork,reuseaddr,cert=/tmp/cert-key.pem,cafile=/vapr/certstore/ca.crt TCP4:"${TARGET_IP}:${TARGET_PORT}" &
+        CHILD_PIDS="${CHILD_PIDS} $!"
+
         echo Forwarding "${EXTERNAL_IP}:${EXTERNAL_PORT}" to "${CONTAINER}:${TARGET_PORT}".
 
         # Register forwarder
@@ -63,8 +64,6 @@ EOF
     done << EOF
 $(echo /tmp/target_container_info | JSON.awk | awk '{ if ($1 ~ /\["NetworkSettings","Ports",.*]/) { print $1 " " $2; } }' | sed 's/.*"Ports","\([0-9]\+\)\/.*/\1/')
 EOF
-    
-    block
 }
 
 usage() {
@@ -87,7 +86,15 @@ if cat /vapr/certstore/"${KEYFILE_BASENAME}".crt /vapr/keys/"${KEYFILE_BASENAME}
     # Switch to the appropriate role.
     case "${ROLE}" in
         client|server)
-            ${ROLE}
+            while [ 1 ]; do
+                ${ROLE}
+                etcdctl_watch vapr/ambassador/"${CONTAINER}"/bindings recursive > /dev/null
+                echo $CHILD_PIDS
+                for pid in $CHILD_PIDS; do
+                    kill -9 $pid
+                done
+                CHILD_PIDS=
+            done
             ;;
         *)
             usage
