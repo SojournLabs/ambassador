@@ -36,5 +36,6 @@ ADD https://raw.githubusercontent.com/SojournLabs/dockertools/master/bin/http.sh
 ADD https://raw.githubusercontent.com/SojournLabs/dockertools/master/bin/etcdctl.sh /bin/etcdctl.sh
 ADD https://raw.githubusercontent.com/step-/JSON.awk/master/JSON.awk /bin/JSON.awk
 RUN chmod +x /bin/http.sh /bin/etcdctl.sh /bin/JSON.awk
+RUN sed -i 's|#!/bin/awk|#!/usr/bin/awk|' /bin/JSON.awk
 ADD amb /bin/amb
 ENTRYPOINT ["/bin/amb"]
