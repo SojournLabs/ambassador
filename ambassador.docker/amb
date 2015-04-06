@@ -21,22 +21,22 @@ block() {
 
 client() {
     # Read the container's ambassador server's public endpoints.
-    for PORT_DIR in $(etcdctl_ls vapr/ambassador/"${CONTAINER}"/bindings); do
+    for PORT_DIR in $(etcdctl_ls vapr/ambassador/"${CONTAINER}"/"${INSTANCE}"/bindings); do
         EXPOSED_PORT=$(basename "${PORT_DIR}")
-        BINDING=$(etcdctl_get vapr/ambassador/"${CONTAINER}"/bindings/"${EXPOSED_PORT}"/bind)
+        BINDING=$(etcdctl_get vapr/ambassador/"${CONTAINER}"/"${INSTANCE}"/bindings/"${EXPOSED_PORT}"/bind)
 
         # Begin forwarding the ports.
         socat TCP-LISTEN:"${EXPOSED_PORT}",reuseaddr,fork openssl-connect:"${BINDING}",cert=/tmp/cert-key.pem,cafile=/vapr/certstore/ca.crt &
         CHILD_PIDS="${CHILD_PIDS} $!"
-        echo Forwarding connections to "${CONTAINER}:${EXPOSED_PORT}".
+        echo Forwarding connections to "${CONTAINER_AND_INSTANCE}:${EXPOSED_PORT}".
     done
 }
 
 server() {
     [[ "${EXTERNAL_IP}" == "" ]] && usage && exit 1
     
-    # Unregister existing ambassadors.
-    etcdctl_rm vapr/ambassador/"${CONTAINER}" recursive
+    # Unregister existing ambassadors for this particular instance.
+    etcdctl_rm vapr/ambassador/"${CONTAINER}"/"${INSTANCE}" recursive
     
     socat TCP-LISTEN:1,reuseaddr UNIX-CLIENT:/var/run/docker.sock &
     socat TCP-LISTEN:2,reuseaddr UNIX-CLIENT:/var/run/docker.sock &
@@ -63,11 +63,11 @@ EOF
         socat openssl-listen:"${INTERNAL_PORT}",fork,reuseaddr,cert=/tmp/cert-key.pem,cafile=/vapr/certstore/ca.crt TCP4:"${TARGET_IP}:${TARGET_PORT}" &
         CHILD_PIDS="${CHILD_PIDS} $!"
 
-        echo Forwarding "${EXTERNAL_IP}:${EXTERNAL_PORT}" to "${CONTAINER}:${TARGET_PORT}".
+        echo Forwarding "${EXTERNAL_IP}:${EXTERNAL_PORT}" to "${CONTAINER_AND_INSTANCE}:${TARGET_PORT}".
 
         # Register forwarder
-        etcdctl_mkdir vapr/ambassador/"${CONTAINER}"/bindings/"${TARGET_PORT}"
-        etcdctl_set vapr/ambassador/"${CONTAINER}"/bindings/"${TARGET_PORT}"/bind "${EXTERNAL_IP}:${EXTERNAL_PORT}"
+        etcdctl_mkdir vapr/ambassador/"${CONTAINER}"/"${INSTANCE}"/bindings/"${TARGET_PORT}"
+        etcdctl_set vapr/ambassador/"${CONTAINER}"/"${INSTANCE}"/bindings/"${TARGET_PORT}"/bind "${EXTERNAL_IP}:${EXTERNAL_PORT}"
 
         IDX=$((IDX + 1))
     done << EOF
@@ -82,10 +82,17 @@ usage() {
 }
 
 # Read the arguments specified.
-for var in ROLE CONTAINER EXTERNAL_IP; do
+for var in ROLE CONTAINER_AND_INSTANCE EXTERNAL_IP; do
     eval "$var=\${1}"
     shift
 done
+
+CONTAINER=${CONTAINER_AND_INSTANCE%@*}
+INSTANCE=${CONTAINER_AND_INSTANCE#*@}
+
+if [ "${INSTANCE}" == "" ]; then
+    INSTANCE="default"
+fi
 
 KEYFILE_NAME=$(ls /vapr/keys)
 KEYFILE_BASENAME="${KEYFILE_NAME%.*}"
@@ -97,7 +104,7 @@ if cat /vapr/certstore/"${KEYFILE_BASENAME}".crt /vapr/keys/"${KEYFILE_BASENAME}
         client|server)
             while [ 1 ]; do
                 ${ROLE}
-                etcdctl_watch vapr/ambassador/"${CONTAINER}"/bindings recursive > /dev/null &
+                etcdctl_watch vapr/ambassador/"${CONTAINER}"/"${INSTANCE}"/bindings recursive > /dev/null &
                 wait $!
                 echo $CHILD_PIDS
                 for pid in $CHILD_PIDS; do
