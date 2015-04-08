@@ -41,11 +41,14 @@ server() {
     socat TCP-LISTEN:1,reuseaddr UNIX-CLIENT:/var/run/docker.sock &
     socat TCP-LISTEN:2,reuseaddr UNIX-CLIENT:/var/run/docker.sock &
 
+    # Keep trying to read (and rebind in case of failure) until success.
     while ! wget -q -O- http://localhost:1/containers/"${CONTAINER}"/json > /tmp/target_container_info; do
+        socat TCP-LISTEN:1,reuseaddr UNIX-CLIENT:/var/run/docker.sock &
         sleep 1;
     done
 
     while ! wget -q -O- http://localhost:2/containers/"${HOSTNAME}"/json > /tmp/ambassador_container_info; do
+        socat TCP-LISTEN:2,reuseaddr UNIX-CLIENT:/var/run/docker.sock &
         sleep 1;
     done
     
