@@ -14,11 +14,6 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
-block() {
-    # Wait for termination signal.
-    mkfifo pipe && cat pipe
-}
-
 client() {
     # Read the container's ambassador server's public endpoints.
     for PORT_DIR in $(etcdctl_ls vapr/ambassador/"${CONTAINER}"/"${INSTANCE}"/bindings); do
