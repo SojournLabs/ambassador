@@ -40,9 +40,14 @@ server() {
     
     socat TCP-LISTEN:1,reuseaddr UNIX-CLIENT:/var/run/docker.sock &
     socat TCP-LISTEN:2,reuseaddr UNIX-CLIENT:/var/run/docker.sock &
-    sleep 1 # Wait for sockets to be set up.
-    wget -q -O- http://localhost:1/containers/"${CONTAINER}"/json > /tmp/target_container_info
-    wget -q -O- http://localhost:2/containers/"${HOSTNAME}"/json > /tmp/ambassador_container_info
+
+    while ! wget -q -O- http://localhost:1/containers/"${CONTAINER}"/json > /tmp/target_container_info; do
+        sleep 1;
+    done
+
+    while ! wget -q -O- http://localhost:2/containers/"${HOSTNAME}"/json > /tmp/ambassador_container_info; do
+        sleep 1;
+    done
     
     HOST_PORTS=$(echo /tmp/ambassador_container_info | JSON.awk | awk '{ if ($1 ~ /\["NetworkSettings","Ports",.*"HostPort"]/) { print $1 " " $2; } }' | sed 's/.*"Ports","\([0-9]\+\).*"\([0-9]\+\)"/\1,\2/')
     TARGET_IP=$(echo /tmp/target_container_info | JSON.awk | awk '{ if ($1 ~ /\["NetworkSettings","IPAddress"]/) { print $2; } }' | sed 's/"\(.*\)"/\1/')
