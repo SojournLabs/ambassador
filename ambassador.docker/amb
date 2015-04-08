@@ -104,8 +104,11 @@ fi
 KEYFILE_NAME=$(ls /vapr/keys)
 KEYFILE_BASENAME="${KEYFILE_NAME%.*}"
 
+# Separate certificate from key
+echo > /tmp/blankline
+
 # Merge the certificate and private key into a pem file at /tmp/cert-key.pem to be used by socat..
-if cat /vapr/certstore/"${KEYFILE_BASENAME}".crt /vapr/keys/"${KEYFILE_BASENAME}".key > /tmp/cert-key.pem 2> /dev/null; then
+if cat /vapr/certstore/"${KEYFILE_BASENAME}".crt /tmp/blankline /vapr/keys/"${KEYFILE_BASENAME}".key > /tmp/cert-key.pem 2> /dev/null; then
     # Switch to the appropriate role.
     case "${ROLE}" in
         client|server)
