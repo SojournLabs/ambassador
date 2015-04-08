@@ -55,6 +55,10 @@ server() {
     HOST_PORTS=$(echo /tmp/ambassador_container_info | JSON.awk | awk '{ if ($1 ~ /\["NetworkSettings","Ports",.*"HostPort"]/) { print $1 " " $2; } }' | sed 's/.*"Ports","\([0-9]\+\).*"\([0-9]\+\)"/\1,\2/')
     TARGET_IP=$(echo /tmp/target_container_info | JSON.awk | awk '{ if ($1 ~ /\["NetworkSettings","IPAddress"]/) { print $2; } }' | sed 's/"\(.*\)"/\1/')
 
+    if [ "${TARGET_IP}" == "" ]; then
+        echo "Target container not running."
+        return 1
+    fi
     IDX=0
     
     while read TARGET_PORT; do
@@ -111,7 +115,7 @@ if cat /vapr/certstore/"${KEYFILE_BASENAME}".crt /vapr/keys/"${KEYFILE_BASENAME}
     case "${ROLE}" in
         client|server)
             while [ 1 ]; do
-                ${ROLE}
+                ${ROLE} || continue
                 etcdctl_watch vapr/ambassador/"${CONTAINER}"/"${INSTANCE}"/bindings recursive > /dev/null &
                 wait $!
                 echo $CHILD_PIDS
